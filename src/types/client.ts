@@ -20,6 +20,7 @@ export const ClientSchema = z.object({
   recurringSchedule: RecurringScheduleSchema.nullable(),
   visitsPerMonth: z.number().int().nonnegative(),
   isOneTime: z.boolean(),
+  isActive: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -28,6 +29,10 @@ export const CreateClientSchema = ClientSchema.omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  isActive: true,
+}).extend({
+  // Default is enforced by the DB column; allow callers to override.
+  isActive: z.boolean().optional(),
 });
 
 export const UpdateClientSchema = z.object({
@@ -41,6 +46,7 @@ export const UpdateClientSchema = z.object({
   recurringSchedule: RecurringScheduleSchema.nullable().optional(),
   visitsPerMonth: z.number().int().nonnegative().optional(),
   isOneTime: z.boolean().optional(),
+  isActive: z.boolean().optional(),
 });
 
 export type RecurringSchedule = z.infer<typeof RecurringScheduleSchema>;

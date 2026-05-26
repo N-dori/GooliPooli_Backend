@@ -1,15 +1,22 @@
+import { dayRangeBounds } from '../../lib/utils/date';
 import { isWithinRadius } from '../../lib/utils/gps';
 import { supabase } from '../../lib/supabase';
+import { logger } from '../../utils/logger';
 import type {
   AddVisitImageInput,
   CheckInInput,
+  Client,
   CreateVisitInput,
   JwtPayload,
+  ListAllVisitsQuery,
   ListVisitsQuery,
   Paginated,
+  Project,
+  PublicUser,
   UpdateVisitInput,
   Visit,
   VisitImage,
+  VisitWithDetails,
 } from '../../types';
 import { badRequest, forbidden, internal, notFound } from '../../utils/errors';
 
@@ -67,6 +74,109 @@ function toVisitImage(row: VisitImageRow): VisitImage {
   };
 }
 
+// ── Row types for joined data ──────────────────────────────────────────────
+
+type ClientRow = {
+  id: string;
+  project_id: string;
+  name: string;
+  address: string;
+  phone: string | null;
+  note: string | null;
+  gate_code: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  recurring_schedule: unknown;
+  visits_per_month: number;
+  is_one_time: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  status: 'active' | 'paused' | 'archived' | 'done';
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type UserRow = {
+  id: string;
+  username: string;
+  email: string;
+  role: 'admin' | 'project_manager' | 'worker';
+  auth_provider: 'password' | 'google';
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type VisitWithDetailsRow = VisitRow & {
+  client: ClientRow | null;
+  project: ProjectRow | null;
+  worker: UserRow | null;
+};
+
+function toClientPartial(row: ClientRow): Client {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    address: row.address,
+    phone: row.phone,
+    note: row.note,
+    gateCode: row.gate_code,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    recurringSchedule: row.recurring_schedule as Client['recurringSchedule'],
+    visitsPerMonth: row.visits_per_month,
+    isOneTime: row.is_one_time,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toProjectPartial(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    description: row.description,
+    status: row.status,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPublicUserPartial(row: UserRow): PublicUser {
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    role: row.role,
+    authProvider: row.auth_provider,
+    avatarUrl: row.avatar_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toVisitWithDetails(row: VisitWithDetailsRow): VisitWithDetails {
+  return {
+    ...toVisit(row),
+    client: row.client ? toClientPartial(row.client) : undefined,
+    project: row.project ? toProjectPartial(row.project) : undefined,
+    worker: row.worker ? toPublicUserPartial(row.worker) : undefined,
+  };
+}
+
 export async function listVisits(
   projectId: string,
   auth: JwtPayload,
@@ -90,7 +200,9 @@ export async function listVisits(
   }
 
   if (date) {
-    q = q.eq('scheduled_date', date);
+    // scheduled_date is timestamptz — match the whole calendar day, not just midnight.
+    const { start, nextDay } = dayRangeBounds(date);
+    q = q.gte('scheduled_date', start).lt('scheduled_date', nextDay);
   }
 
   if (status) {
@@ -98,7 +210,10 @@ export async function listVisits(
   }
 
   const { data, error, count } = await q.range(from, to);
-  if (error) throw internal(error.message);
+  if (error) {
+    logger.error({ err: error, op: 'listVisits', projectId, query }, 'supabase query failed');
+    throw internal(error.message);
+  }
 
   const total = count ?? 0;
   return {
@@ -168,6 +283,11 @@ export async function updateVisit(
   if (input.status !== undefined) patch.status = input.status;
   if (input.scheduledDate !== undefined) patch.scheduled_date = input.scheduledDate;
   if (input.workerNotes !== undefined) patch.worker_notes = input.workerNotes;
+  if (input.completedAt !== undefined) patch.completed_at = input.completedAt;
+  // Auto-stamp completed_at when marking complete if not explicitly provided
+  if (input.status === 'completed' && input.completedAt === undefined) {
+    patch.completed_at = new Date().toISOString();
+  }
   // Only admins/managers can set manager_notes
   if (input.managerNotes !== undefined && auth.role !== 'worker') {
     patch.manager_notes = input.managerNotes;
@@ -282,7 +402,9 @@ export async function addImage(
 ): Promise<VisitImage> {
   const { data, error } = await supabase
     .from('visit_images')
-    .insert({ visit_id: visitId, image_url: input.imageUrl })
+    .insert({ visit_id: visitId,
+              image_url: input.imageUrl
+       })
     .select('*')
     .single<VisitImageRow>();
 
@@ -294,4 +416,63 @@ export async function addImage(
 export async function deleteVisit(id: string): Promise<void> {
   const { error } = await supabase.from('visits').delete().eq('id', id);
   if (error) throw internal(error.message);
+}
+
+/**
+ * Diary feed — crosses all projects the caller has access to.
+ * GET /api/v1/visits?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
+ *
+ * Workers: only their own visits.
+ * Admins/managers: all visits (optionally filtered by workerId / projectId).
+ */
+export async function listAllVisits(
+  auth: JwtPayload,
+  query: ListAllVisitsQuery,
+): Promise<Paginated<VisitWithDetails>> {
+  const { page, pageSize, dateFrom, dateTo, workerId, projectId, status } = query;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  // Join related records so the diary can show client/project/worker details.
+  const joinSelect = [
+    '*',
+    'client:clients!client_id(id,project_id,name,address,phone,note,gate_code,latitude,longitude,recurring_schedule,visits_per_month,is_one_time,is_active,created_at,updated_at)',
+    'project:projects!project_id(id,name,code,description,status,created_by,created_at,updated_at)',
+    'worker:users!worker_id(id,username,email,role,auth_provider,avatar_url,created_at,updated_at)',
+  ].join(',');
+
+  let q = supabase
+    .from('visits')
+    .select(joinSelect, { count: 'exact' })
+    .order('scheduled_date', { ascending: true });
+
+  // Scope to own visits for workers
+  if (auth.role === 'worker') {
+    q = q.eq('worker_id', auth.sub);
+  } else {
+    // Non-workers may optionally filter by project or worker
+    if (projectId) q = q.eq('project_id', projectId);
+    if (workerId) q = q.eq('worker_id', workerId);
+  }
+
+  // scheduled_date is timestamptz; convert YYYY-MM-DD bounds to UTC instants
+  // so visits later on the boundary day are not excluded.
+  if (dateFrom) q = q.gte('scheduled_date', dayRangeBounds(dateFrom).start);
+  if (dateTo) q = q.lt('scheduled_date', dayRangeBounds(dateTo).nextDay);
+  if (status) q = q.eq('status', status);
+
+  const { data, error, count } = await q.range(from, to);
+  if (error) {
+    logger.error({ err: error, op: 'listAllVisits', auth, query }, 'supabase query failed');
+    throw internal(error.message);
+  }
+
+  const total = count ?? 0;
+  return {
+    items: ((data as unknown as VisitWithDetailsRow[]) ?? []).map(toVisitWithDetails),
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
 }

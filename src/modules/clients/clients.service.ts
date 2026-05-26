@@ -24,6 +24,7 @@ type ClientRow = {
   } | null;
   visits_per_month: number;
   is_one_time: boolean;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +43,7 @@ function toClient(row: ClientRow): Client {
     recurringSchedule: row.recurring_schedule,
     visitsPerMonth: row.visits_per_month,
     isOneTime: row.is_one_time,
+    isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -103,6 +105,8 @@ export async function createClient(
       recurring_schedule: input.recurringSchedule ?? null,
       visits_per_month: input.visitsPerMonth ?? 0,
       is_one_time: input.isOneTime ?? false,
+      // Falls back to DB default (true) when omitted.
+      ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
     })
     .select('*')
     .single<ClientRow>();
@@ -128,6 +132,7 @@ export async function updateClient(
   if (input.recurringSchedule !== undefined) patch.recurring_schedule = input.recurringSchedule;
   if (input.visitsPerMonth !== undefined) patch.visits_per_month = input.visitsPerMonth;
   if (input.isOneTime !== undefined) patch.is_one_time = input.isOneTime;
+  if (input.isActive !== undefined) patch.is_active = input.isActive;
 
   const { data, error } = await supabase
     .from('clients')

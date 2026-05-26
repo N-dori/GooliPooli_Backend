@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { VisitStatus } from './enums';
+import type { Client } from './client';
+import type { Project } from './project';
+import type { PublicUser } from './user';
 
 export const VisitSchema = z.object({
   id: z.string().uuid(),
@@ -40,6 +43,7 @@ export const UpdateVisitSchema = z.object({
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD').optional(),
   workerNotes: z.string().max(4000).nullable().optional(),
   managerNotes: z.string().max(4000).nullable().optional(),
+  completedAt: z.string().datetime().nullable().optional(),
 });
 
 export const AddVisitImageSchema = z.object({
@@ -60,6 +64,17 @@ export const ListVisitsQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(50),
 });
 
+/** Query for the top-level diary feed: GET /visits?dateFrom=…&dateTo=… */
+export const ListAllVisitsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  workerId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  status: VisitStatus.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(50),
+});
+
 export type Visit = z.infer<typeof VisitSchema>;
 export type VisitImage = z.infer<typeof VisitImageSchema>;
 export type CreateVisitInput = z.infer<typeof CreateVisitSchema>;
@@ -67,3 +82,11 @@ export type UpdateVisitInput = z.infer<typeof UpdateVisitSchema>;
 export type AddVisitImageInput = z.infer<typeof AddVisitImageSchema>;
 export type CheckInInput = z.infer<typeof CheckInSchema>;
 export type ListVisitsQuery = z.infer<typeof ListVisitsQuerySchema>;
+export type ListAllVisitsQuery = z.infer<typeof ListAllVisitsQuerySchema>;
+
+/** Visit with optionally-joined related records. */
+export interface VisitWithDetails extends Visit {
+  client?: Client;
+  project?: Project;
+  worker?: PublicUser;
+}

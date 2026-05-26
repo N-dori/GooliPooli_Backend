@@ -4,12 +4,14 @@ import {
   authRequired,
   requireProjectAccess,
   requireRole,
+  requireVisitProjectAccess,
 } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import {
   AddVisitImageSchema,
   CheckInSchema,
   CreateVisitSchema,
+  ListAllVisitsQuerySchema,
   ListVisitsQuerySchema,
   UpdateVisitSchema,
 } from '../../types';
@@ -54,15 +56,24 @@ visitsRoutes.use(authRequired);
 
 const VisitIdParam = z.object({ id: z.string().uuid() });
 
+// Diary feed — must be registered before /:id
+visitsRoutes.get(
+  '/',
+  validate('query', ListAllVisitsQuerySchema),
+  controller.listAll,
+);
+
 visitsRoutes.get(
   '/:id',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   controller.get,
 );
 
 visitsRoutes.patch(
   '/:id',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   validate('body', UpdateVisitSchema),
   controller.update,
 );
@@ -77,6 +88,7 @@ visitsRoutes.delete(
 visitsRoutes.post(
   '/:id/check-in',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   validate('body', CheckInSchema),
   controller.checkIn,
 );
@@ -84,18 +96,21 @@ visitsRoutes.post(
 visitsRoutes.post(
   '/:id/complete',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   controller.completeVisit,
 );
 
 visitsRoutes.get(
   '/:id/images',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   controller.getImages,
 );
 
 visitsRoutes.post(
   '/:id/images',
   validate('params', VisitIdParam),
+  requireVisitProjectAccess,
   validate('body', AddVisitImageSchema),
   controller.addImage,
 );

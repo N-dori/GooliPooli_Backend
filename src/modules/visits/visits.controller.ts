@@ -2,6 +2,21 @@ import type { NextFunction, Request, Response } from 'express';
 import type { AuthenticatedRequest } from '../../middleware/auth';
 import * as service from './visits.service';
 
+// ── Cross-project diary feed: GET /visits ──────────────────────────────────
+
+export async function listAll(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const auth = (req as AuthenticatedRequest).auth;
+    const result = await service.listAllVisits(
+      auth,
+      req.query as unknown as Parameters<typeof service.listAllVisits>[1],
+    );
+    res.json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ── Project-scoped (list + create) ─────────────────────────────────────────
 
 export async function list(req: Request, res: Response, next: NextFunction): Promise<void> {

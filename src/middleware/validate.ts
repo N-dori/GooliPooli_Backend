@@ -10,8 +10,14 @@ export function validate(target: Target, schema: ZodSchema): RequestHandler {
       next(parsed.error);
       return;
     }
-    // overwrite with parsed value so downstream handlers see coerced/defaulted data
-    (req as unknown as Record<Target, unknown>)[target] = parsed.data;
+    // Express 5 makes req.query a getter; plain assignment throws. Use
+    // defineProperty so coerced/defaulted values flow to downstream handlers.
+    Object.defineProperty(req, target, {
+      value: parsed.data,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
     next();
   };
 }
