@@ -30,6 +30,20 @@ export const CreateClientSchema = ClientSchema.omit({
   updatedAt: true,
 });
 
+export const UpdateClientSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  address: z.string().max(500).optional(),
+  phone: z.string().max(40).nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
+  gateCode: z.string().max(40).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  recurringSchedule: RecurringScheduleSchema.nullable().optional(),
+  visitsPerMonth: z.number().int().nonnegative().optional(),
+  isOneTime: z.boolean().optional(),
+});
+
 export type RecurringSchedule = z.infer<typeof RecurringScheduleSchema>;
 export type Client = z.infer<typeof ClientSchema>;
 export type CreateClientInput = z.infer<typeof CreateClientSchema>;
+export type UpdateClientInput = z.infer<typeof UpdateClientSchema>;

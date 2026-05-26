@@ -22,6 +22,21 @@ export const CreateUserSchema = z.object({
   role: UserRole.default('worker'),
 });
 
+/** Admin: can change role, username, avatarUrl. */
+export const UpdateUserSchema = z.object({
+  username: z.string().min(2).max(64).optional(),
+  role: UserRole.optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+});
+
+/** Self-update: cannot change own role. */
+export const UpdateSelfSchema = z.object({
+  username: z.string().min(2).max(64).optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+});
+
 export type User = z.infer<typeof UserSchema>;
 export type PublicUser = z.infer<typeof PublicUserSchema>;
 export type CreateUserInput = z.infer<typeof CreateUserSchema>;
+export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
+export type UpdateSelfInput = z.infer<typeof UpdateSelfSchema>;
