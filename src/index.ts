@@ -6,5 +6,5 @@ import { logger } from './utils/logger';
 const app = createApp();
 
 app.listen(env.API_PORT, env.API_HOST, () => {
-  logger.info({ port: env.API_PORT, host: env.API_HOST }, 'Golipooli API listening');
+  logger.info({ port: env.API_PORT, host: env.API_HOST }, 'Goolipooli API listening');
 });

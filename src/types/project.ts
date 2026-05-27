@@ -1,6 +1,10 @@
 import { z } from 'zod';
-import { ProjectMemberRole, ProjectStatus } from './enums';
+import { ProjectStatus } from './enums';
 
+/**
+ * Project is no longer a scope. It's the single global "app instance" record —
+ * roughly the name/identity of this deployment.
+ */
 export const ProjectSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2).max(120),
@@ -10,14 +14,9 @@ export const ProjectSchema = z.object({
     .regex(/^[A-Z0-9]{6}$/),
   description: z.string().nullable(),
   status: ProjectStatus,
-  createdBy: z.string().uuid(),
+  createdBy: z.string().uuid().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-});
-
-export const CreateProjectSchema = z.object({
-  name: z.string().min(2).max(120),
-  description: z.string().max(2000).nullable().optional(),
 });
 
 export const UpdateProjectSchema = z.object({
@@ -26,23 +25,5 @@ export const UpdateProjectSchema = z.object({
   status: ProjectStatus.optional(),
 });
 
-export const UserProjectSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  projectId: z.string().uuid(),
-  role: ProjectMemberRole,
-  joinedAt: z.string().datetime(),
-});
-
-export const ProjectWithStatsSchema = ProjectSchema.extend({
-  clientCount: z.number().int().nonnegative(),
-  workerCount: z.number().int().nonnegative(),
-  visitsThisWeek: z.number().int().nonnegative(),
-  visitsCompletedThisWeek: z.number().int().nonnegative(),
-});
-
 export type Project = z.infer<typeof ProjectSchema>;
-export type CreateProjectInput = z.infer<typeof CreateProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof UpdateProjectSchema>;
-export type UserProject = z.infer<typeof UserProjectSchema>;
-export type ProjectWithStats = z.infer<typeof ProjectWithStatsSchema>;

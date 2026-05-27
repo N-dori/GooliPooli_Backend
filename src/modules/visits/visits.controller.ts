@@ -2,31 +2,12 @@ import type { NextFunction, Request, Response } from 'express';
 import type { AuthenticatedRequest } from '../../middleware/auth';
 import * as service from './visits.service';
 
-// ── Cross-project diary feed: GET /visits ──────────────────────────────────
-
-export async function listAll(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const auth = (req as AuthenticatedRequest).auth;
-    const result = await service.listAllVisits(
-      auth,
-      req.query as unknown as Parameters<typeof service.listAllVisits>[1],
-    );
-    res.json({ data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// ── Project-scoped (list + create) ─────────────────────────────────────────
-
 export async function list(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const auth = (req as AuthenticatedRequest).auth;
-    const { projectId } = req.params as { projectId: string };
     const result = await service.listVisits(
-      projectId,
       auth,
-      req.query as unknown as Parameters<typeof service.listVisits>[2],
+      req.query as unknown as Parameters<typeof service.listVisits>[1],
     );
     res.json({ data: result });
   } catch (err) {
@@ -36,15 +17,13 @@ export async function list(req: Request, res: Response, next: NextFunction): Pro
 
 export async function create(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { projectId } = req.params as { projectId: string };
-    const visit = await service.createVisit(projectId, req.body);
+    const auth = (req as AuthenticatedRequest).auth;
+    const visit = await service.createVisit(auth?.sub ?? null, req.body);
     res.status(201).json({ data: visit });
   } catch (err) {
     next(err);
   }
 }
-
-// ── Standalone (get / update / check-in / complete / images) ───────────────
 
 export async function get(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

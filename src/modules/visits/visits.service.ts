@@ -8,10 +8,8 @@ import type {
   Client,
   CreateVisitInput,
   JwtPayload,
-  ListAllVisitsQuery,
   ListVisitsQuery,
   Paginated,
-  Project,
   PublicUser,
   UpdateVisitInput,
   Visit,
@@ -22,7 +20,6 @@ import { badRequest, forbidden, internal, notFound } from '../../utils/errors';
 
 type VisitRow = {
   id: string;
-  project_id: string;
   client_id: string;
   worker_id: string | null;
   scheduled_date: string;
@@ -48,7 +45,6 @@ type VisitImageRow = {
 function toVisit(row: VisitRow): Visit {
   return {
     id: row.id,
-    projectId: row.project_id,
     clientId: row.client_id,
     workerId: row.worker_id,
     scheduledDate: row.scheduled_date,
@@ -78,7 +74,6 @@ function toVisitImage(row: VisitImageRow): VisitImage {
 
 type ClientRow = {
   id: string;
-  project_id: string;
   name: string;
   address: string;
   phone: string | null;
@@ -90,17 +85,6 @@ type ClientRow = {
   visits_per_month: number;
   is_one_time: boolean;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type ProjectRow = {
-  id: string;
-  name: string;
-  code: string;
-  description: string | null;
-  status: 'active' | 'paused' | 'archived' | 'done';
-  created_by: string;
   created_at: string;
   updated_at: string;
 };
@@ -118,14 +102,12 @@ type UserRow = {
 
 type VisitWithDetailsRow = VisitRow & {
   client: ClientRow | null;
-  project: ProjectRow | null;
   worker: UserRow | null;
 };
 
 function toClientPartial(row: ClientRow): Client {
   return {
     id: row.id,
-    projectId: row.project_id,
     name: row.name,
     address: row.address,
     phone: row.phone,
@@ -137,19 +119,6 @@ function toClientPartial(row: ClientRow): Client {
     visitsPerMonth: row.visits_per_month,
     isOneTime: row.is_one_time,
     isActive: row.is_active,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function toProjectPartial(row: ProjectRow): Project {
-  return {
-    id: row.id,
-    name: row.name,
-    code: row.code,
-    description: row.description,
-    status: row.status,
-    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -172,56 +141,7 @@ function toVisitWithDetails(row: VisitWithDetailsRow): VisitWithDetails {
   return {
     ...toVisit(row),
     client: row.client ? toClientPartial(row.client) : undefined,
-    project: row.project ? toProjectPartial(row.project) : undefined,
     worker: row.worker ? toPublicUserPartial(row.worker) : undefined,
-  };
-}
-
-export async function listVisits(
-  projectId: string,
-  auth: JwtPayload,
-  query: ListVisitsQuery,
-): Promise<Paginated<Visit>> {
-  const { page, pageSize, date, workerId, status } = query;
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-
-  let q = supabase
-    .from('visits')
-    .select('*', { count: 'exact' })
-    .eq('project_id', projectId)
-    .order('scheduled_date', { ascending: true });
-
-  // Workers only see their own visits
-  if (auth.role === 'worker') {
-    q = q.eq('worker_id', auth.sub);
-  } else if (workerId) {
-    q = q.eq('worker_id', workerId);
-  }
-
-  if (date) {
-    // scheduled_date is timestamptz — match the whole calendar day, not just midnight.
-    const { start, nextDay } = dayRangeBounds(date);
-    q = q.gte('scheduled_date', start).lt('scheduled_date', nextDay);
-  }
-
-  if (status) {
-    q = q.eq('status', status);
-  }
-
-  const { data, error, count } = await q.range(from, to);
-  if (error) {
-    logger.error({ err: error, op: 'listVisits', projectId, query }, 'supabase query failed');
-    throw internal(error.message);
-  }
-
-  const total = count ?? 0;
-  return {
-    items: (data as VisitRow[] ?? []).map(toVisit),
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
   };
 }
 
@@ -238,19 +158,20 @@ export async function getVisit(id: string): Promise<Visit> {
 }
 
 export async function createVisit(
-  projectId: string,
+  _creatorId: string | null,
   input: CreateVisitInput,
 ): Promise<Visit> {
   const { data, error } = await supabase
     .from('visits')
     .insert({
-      project_id: projectId,
       client_id: input.clientId,
       worker_id: input.workerId ?? null,
       scheduled_date: input.scheduledDate,
       status: 'scheduled',
       worker_notes: input.workerNotes ?? null,
       manager_notes: input.managerNotes ?? null,
+      gps_latitude: input.gpsLatitude ?? null,
+      gps_longitude: input.gpsLongitude ?? null,
       gps_validated: false,
     })
     .select('*')
@@ -271,7 +192,6 @@ export async function updateVisit(
 
   if (auth.role === 'worker') {
     if (existing.workerId !== auth.sub) throw forbidden('Not assigned to this visit');
-    // Workers can only update worker_notes and status (in_progress / completed / missed)
     const allowedStatuses = new Set(['in_progress', 'completed', 'missed']);
     if (input.status && !allowedStatuses.has(input.status)) {
       throw badRequest('Workers may only set status to in_progress, completed, or missed');
@@ -284,11 +204,9 @@ export async function updateVisit(
   if (input.scheduledDate !== undefined) patch.scheduled_date = input.scheduledDate;
   if (input.workerNotes !== undefined) patch.worker_notes = input.workerNotes;
   if (input.completedAt !== undefined) patch.completed_at = input.completedAt;
-  // Auto-stamp completed_at when marking complete if not explicitly provided
   if (input.status === 'completed' && input.completedAt === undefined) {
     patch.completed_at = new Date().toISOString();
   }
-  // Only admins/managers can set manager_notes
   if (input.managerNotes !== undefined && auth.role !== 'worker') {
     patch.manager_notes = input.managerNotes;
   }
@@ -320,7 +238,6 @@ export async function checkIn(
     throw badRequest('Visit is not in a check-in eligible state');
   }
 
-  // Validate GPS against client location if available
   let gpsValidated = false;
   if (existing.clientId) {
     const { data: clientRow } = await supabase
@@ -402,9 +319,7 @@ export async function addImage(
 ): Promise<VisitImage> {
   const { data, error } = await supabase
     .from('visit_images')
-    .insert({ visit_id: visitId,
-              image_url: input.imageUrl
-       })
+    .insert({ visit_id: visitId, image_url: input.imageUrl })
     .select('*')
     .single<VisitImageRow>();
 
@@ -419,25 +334,23 @@ export async function deleteVisit(id: string): Promise<void> {
 }
 
 /**
- * Diary feed — crosses all projects the caller has access to.
+ * Diary feed — global, no project scope.
  * GET /api/v1/visits?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
  *
  * Workers: only their own visits.
- * Admins/managers: all visits (optionally filtered by workerId / projectId).
+ * Admins/managers: all visits (optionally filtered by workerId).
  */
-export async function listAllVisits(
+export async function listVisits(
   auth: JwtPayload,
-  query: ListAllVisitsQuery,
+  query: ListVisitsQuery,
 ): Promise<Paginated<VisitWithDetails>> {
-  const { page, pageSize, dateFrom, dateTo, workerId, projectId, status } = query;
+  const { page, pageSize, dateFrom, dateTo, date, workerId, status } = query;
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  // Join related records so the diary can show client/project/worker details.
   const joinSelect = [
     '*',
-    'client:clients!client_id(id,project_id,name,address,phone,note,gate_code,latitude,longitude,recurring_schedule,visits_per_month,is_one_time,is_active,created_at,updated_at)',
-    'project:projects!project_id(id,name,code,description,status,created_by,created_at,updated_at)',
+    'client:clients!client_id(id,name,address,phone,note,gate_code,latitude,longitude,recurring_schedule,visits_per_month,is_one_time,is_active,created_at,updated_at)',
     'worker:users!worker_id(id,username,email,role,auth_provider,avatar_url,created_at,updated_at)',
   ].join(',');
 
@@ -446,24 +359,26 @@ export async function listAllVisits(
     .select(joinSelect, { count: 'exact' })
     .order('scheduled_date', { ascending: true });
 
-  // Scope to own visits for workers
   if (auth.role === 'worker') {
     q = q.eq('worker_id', auth.sub);
-  } else {
-    // Non-workers may optionally filter by project or worker
-    if (projectId) q = q.eq('project_id', projectId);
-    if (workerId) q = q.eq('worker_id', workerId);
+  } else if (workerId) {
+    q = q.eq('worker_id', workerId);
   }
 
-  // scheduled_date is timestamptz; convert YYYY-MM-DD bounds to UTC instants
-  // so visits later on the boundary day are not excluded.
-  if (dateFrom) q = q.gte('scheduled_date', dayRangeBounds(dateFrom).start);
-  if (dateTo) q = q.lt('scheduled_date', dayRangeBounds(dateTo).nextDay);
+  // `date` is shorthand for a single calendar day.
+  if (date) {
+    const { start, nextDay } = dayRangeBounds(date);
+    q = q.gte('scheduled_date', start).lt('scheduled_date', nextDay);
+  } else {
+    if (dateFrom) q = q.gte('scheduled_date', dayRangeBounds(dateFrom).start);
+    if (dateTo) q = q.lt('scheduled_date', dayRangeBounds(dateTo).nextDay);
+  }
+
   if (status) q = q.eq('status', status);
 
   const { data, error, count } = await q.range(from, to);
   if (error) {
-    logger.error({ err: error, op: 'listAllVisits', auth, query }, 'supabase query failed');
+    logger.error({ err: error, op: 'listVisits', auth, query }, 'supabase query failed');
     throw internal(error.message);
   }
 

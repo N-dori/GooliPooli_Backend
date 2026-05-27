@@ -9,7 +9,6 @@ import { internal, notFound } from '../../utils/errors';
 
 type ClientRow = {
   id: string;
-  project_id: string;
   name: string;
   address: string;
   phone: string | null;
@@ -32,7 +31,6 @@ type ClientRow = {
 function toClient(row: ClientRow): Client {
   return {
     id: row.id,
-    projectId: row.project_id,
     name: row.name,
     address: row.address,
     phone: row.phone,
@@ -50,7 +48,6 @@ function toClient(row: ClientRow): Client {
 }
 
 export async function listClients(
-  projectId: string,
   { page, pageSize }: { page: number; pageSize: number },
 ): Promise<Paginated<Client>> {
   const from = (page - 1) * pageSize;
@@ -59,7 +56,6 @@ export async function listClients(
   const { data, error, count } = await supabase
     .from('clients')
     .select('*', { count: 'exact' })
-    .eq('project_id', projectId)
     .order('name', { ascending: true })
     .range(from, to);
 
@@ -74,12 +70,11 @@ export async function listClients(
   };
 }
 
-export async function getClient(id: string, projectId: string): Promise<Client> {
+export async function getClient(id: string): Promise<Client> {
   const { data, error } = await supabase
     .from('clients')
     .select('*')
     .eq('id', id)
-    .eq('project_id', projectId)
     .maybeSingle<ClientRow>();
 
   if (error) throw internal(error.message);
@@ -88,13 +83,12 @@ export async function getClient(id: string, projectId: string): Promise<Client> 
 }
 
 export async function createClient(
-  projectId: string,
+  _creatorId: string | null,
   input: CreateClientInput,
 ): Promise<Client> {
   const { data, error } = await supabase
     .from('clients')
     .insert({
-      project_id: projectId,
       name: input.name,
       address: input.address,
       phone: input.phone ?? null,
@@ -105,7 +99,6 @@ export async function createClient(
       recurring_schedule: input.recurringSchedule ?? null,
       visits_per_month: input.visitsPerMonth ?? 0,
       is_one_time: input.isOneTime ?? false,
-      // Falls back to DB default (true) when omitted.
       ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
     })
     .select('*')
@@ -118,7 +111,6 @@ export async function createClient(
 
 export async function updateClient(
   id: string,
-  projectId: string,
   input: UpdateClientInput,
 ): Promise<Client> {
   const patch: Record<string, unknown> = {};
@@ -138,7 +130,6 @@ export async function updateClient(
     .from('clients')
     .update(patch)
     .eq('id', id)
-    .eq('project_id', projectId)
     .select('*')
     .maybeSingle<ClientRow>();
 
@@ -147,12 +138,11 @@ export async function updateClient(
   return toClient(data);
 }
 
-export async function deleteClient(id: string, projectId: string): Promise<void> {
+export async function deleteClient(id: string): Promise<void> {
   const { error } = await supabase
     .from('clients')
     .delete()
-    .eq('id', id)
-    .eq('project_id', projectId);
+    .eq('id', id);
 
   if (error) throw internal(error.message);
 }

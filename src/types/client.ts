@@ -9,7 +9,6 @@ export const RecurringScheduleSchema = z.object({
 
 export const ClientSchema = z.object({
   id: z.string().uuid(),
-  projectId: z.string().uuid(),
   name: z.string().min(1).max(120),
   address: z.string().max(500),
   phone: z.string().max(40).nullable(),
@@ -25,13 +24,17 @@ export const ClientSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-export const CreateClientSchema = ClientSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  isActive: true,
-}).extend({
-  // Default is enforced by the DB column; allow callers to override.
+export const CreateClientSchema = z.object({
+  name: z.string().min(1).max(120),
+  address: z.string().max(500),
+  phone: z.string().max(40).nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
+  gateCode: z.string().max(40).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  recurringSchedule: RecurringScheduleSchema.nullable().optional(),
+  visitsPerMonth: z.number().int().nonnegative().optional(),
+  isOneTime: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 
